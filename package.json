@@ -1,0 +1,9 @@
+{
+  "name": "calebs-music-of-the-week",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^10.7.9"
+  }
+}
