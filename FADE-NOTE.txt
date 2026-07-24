@@ -1,0 +1,3 @@
+Spotify Embed audio cannot be volume-faded because Spotify's iframe API has no volume method.
+
+This version prefers an uploaded/direct preview when one exists. The album-art button then plays that native audio, analyzes it, and smoothly lowers its real volume during the final 3.5 seconds. The Spotify embed stays visible below as the full-song option.

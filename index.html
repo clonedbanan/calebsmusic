@@ -749,7 +749,7 @@
         <button class="button" id="uploadAudio" type="button" style="width:100%;margin-top:8px">Upload audio fallback</button>
         <input id="audioFile" type="file" accept="audio/*" hidden />
         <p class="status-line" id="previewStatus"></p>
-        <p class="admin-note">The public player uses the exact Spotify embed from the pasted link. An uploaded file is only used when a song has no Spotify link.</p>
+        <p class="admin-note">If you upload a preview, the artwork button plays that native audio with true visualization and a smooth 3.5-second fade. Spotify remains available below for full playback.</p>
       </div>
 
       <div class="field"><label for="appleMusicInput">Apple Music</label><input id="appleMusicInput" type="url" /></div>
@@ -1187,7 +1187,7 @@
 
     function setPlayIcons(isPlaying) {
       const song = data.songs[displayedIndex];
-      if (IS_EMBEDDED && song?.links?.spotify) {
+      if (IS_EMBEDDED && song?.links?.spotify && !song?.previewUrl) {
         elements.coverPlayIcon.innerHTML = OPEN_ICON;
         elements.coverPlayButton.setAttribute("aria-label", "Open this song in Spotify");
         elements.coverPlayButton.setAttribute("title", "Open this song in Spotify");
@@ -1196,7 +1196,8 @@
 
       const icon = isPlaying ? PAUSE_ICON : PLAY_ICON;
       elements.coverPlayIcon.innerHTML = icon;
-      const label = isPlaying ? "Pause Spotify preview" : "Play Spotify preview";
+      const sourceName = song?.previewUrl ? "audio preview" : "Spotify preview";
+      const label = isPlaying ? `Pause ${sourceName}` : `Play ${sourceName}`;
       elements.coverPlayButton.setAttribute("aria-label", label);
       elements.coverPlayButton.setAttribute("title", label);
     }
@@ -1394,47 +1395,67 @@
 
     function loadPlaybackForSong(song) {
       const spotifyUrl = song.links?.spotify || "";
-      const fallbackUrl = song.previewUrl || "";
+      const previewUrl = song.previewUrl || "";
       const hasSpotify = Boolean(spotifyEntityFromUrl(spotifyUrl));
 
       elements.spotifyPlayerShell.hidden = !hasSpotify;
-      elements.coverPlayButton.disabled = !hasSpotify && !fallbackUrl;
+      elements.coverPlayButton.disabled = !hasSpotify && !previewUrl;
       spotifyPlayback.isPaused = true;
       setPlayIcons(false);
 
+      // Keep the official Spotify player visible as the full-song option.
       if (hasSpotify) {
-        elements.audioPlayer.pause();
-        elements.audioPlayer.removeAttribute("src");
-        elements.audioPlayer.load();
-        lastSourceUrl = "";
         mountSpotifyPlayer(spotifyUrl);
+      } else {
+        if (spotifyController && spotifyControllerReady) {
+          try { spotifyController.pause(); } catch {}
+        }
+        elements.spotifyEmbed.innerHTML = "";
+      }
+
+      // When an uploaded/direct preview exists, it becomes the artwork
+      // button's playback source. Because it is native page audio, it can be
+      // analyzed and smoothly faded before it ends.
+      if (previewUrl) {
+        if (lastSourceUrl !== previewUrl) {
+          elements.audioPlayer.crossOrigin = previewUrl.startsWith("data:") || previewUrl.startsWith("blob:") ? null : "anonymous";
+          elements.audioPlayer.src = previewUrl;
+          elements.audioPlayer.load();
+          lastSourceUrl = previewUrl;
+        }
+        elements.audioStatus.textContent = song.previewSource || "Uploaded audio preview.";
         return;
       }
 
-      if (spotifyController && spotifyControllerReady) {
-        try { spotifyController.pause(); } catch {}
-      }
-      elements.spotifyEmbed.innerHTML = "";
-
-      if (!fallbackUrl) {
-        elements.audioPlayer.removeAttribute("src");
-        elements.audioPlayer.load();
-        lastSourceUrl = "";
-        elements.audioStatus.textContent = "No Spotify link or uploaded audio is available for this song.";
-        return;
-      }
-
-      if (lastSourceUrl !== fallbackUrl) {
-        elements.audioPlayer.crossOrigin = fallbackUrl.startsWith("data:") || fallbackUrl.startsWith("blob:") ? null : "anonymous";
-        elements.audioPlayer.src = fallbackUrl;
-        elements.audioPlayer.load();
-        lastSourceUrl = fallbackUrl;
-      }
-      elements.audioStatus.textContent = song.previewSource || "Uploaded audio fallback.";
+      elements.audioPlayer.pause();
+      elements.audioPlayer.removeAttribute("src");
+      elements.audioPlayer.load();
+      lastSourceUrl = "";
+      elements.audioStatus.textContent = hasSpotify
+        ? ""
+        : "No Spotify link or uploaded audio is available for this song.";
     }
 
     async function togglePlayback() {
       const song = data.songs[displayedIndex];
+
+      // Prefer native preview audio whenever one is available. This keeps the
+      // click, audio, analyzer, particles, and fade inside this exact page.
+      if (song?.previewUrl && elements.audioPlayer.src) {
+        if (elements.audioPlayer.paused) {
+          try {
+            await ensureAudioGraph();
+            elements.audioPlayer.volume = 1;
+            await elements.audioPlayer.play();
+          } catch (error) {
+            console.error(error);
+            elements.audioStatus.textContent = "The uploaded audio could not play or be analyzed.";
+          }
+        } else {
+          elements.audioPlayer.pause();
+        }
+        return;
+      }
 
       // Google Sites places this page inside an iframe, and Spotify is then a
       // second nested iframe. Browsers do not reliably pass the album click
@@ -1474,18 +1495,6 @@
         return;
       }
 
-      if (!elements.audioPlayer.src) return;
-      if (elements.audioPlayer.paused) {
-        try {
-          await ensureAudioGraph();
-          await elements.audioPlayer.play();
-        } catch (error) {
-          console.error(error);
-          elements.audioStatus.textContent = "The uploaded audio could not play or be analyzed.";
-        }
-      } else {
-        elements.audioPlayer.pause();
-      }
     }
 
     async function ensureAudioGraph() {
@@ -1649,6 +1658,12 @@
       } else if (nativeNowPlaying && Number.isFinite(elements.audioPlayer.duration)) {
         const remainingSeconds = Math.max(0, elements.audioPlayer.duration - elements.audioPlayer.currentTime);
         endingFade = Math.min(1, remainingSeconds / 3.5);
+      }
+
+      if (nativeNowPlaying) {
+        // Update on every animation frame for a smooth, audible fade instead
+        // of the coarse steps produced by the timeupdate event alone.
+        elements.audioPlayer.volume = endingFade;
       }
 
       if (!nowPlaying && particles.length) stopVisualizerEffects();
