@@ -1,0 +1,2 @@
+This version restores Spotify togglePlay() for the album-art button on the direct Netlify site.
+When embedded in Google Sites, the album button still opens the exact Spotify track because nested iframe playback is not reliable.

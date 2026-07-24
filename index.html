@@ -1446,25 +1446,24 @@
       }
 
       if (song?.links?.spotify && spotifyController && spotifyControllerReady) {
-        const attemptId = ++spotifyPlayAttemptCounter;
-        const wasPlaying = !spotifyPlayback.isPaused && !spotifyPlayback.isBuffering;
-
+        // On the standalone site this click is a direct user gesture, and
+        // Spotify's togglePlay method is the most dependable control path.
         try {
-          // An explicit play/resume call is more reliable than togglePlay when
-          // this page sits inside Google Sites and Spotify is a nested iframe.
-          if (wasPlaying) {
-            spotifyController.pause();
-          } else if (spotifyPlayback.position > 0) {
-            spotifyController.resume();
-          } else {
-            spotifyController.play();
-          }
+          spotifyController.togglePlay();
         } catch (error) {
           console.error(error);
-          try { spotifyController.togglePlay(); }
-          catch (fallbackError) { console.error(fallbackError); }
+          try {
+            if (!spotifyPlayback.isPaused && !spotifyPlayback.isBuffering) {
+              spotifyController.pause();
+            } else {
+              spotifyController.resume();
+            }
+          } catch (fallbackError) {
+            console.error(fallbackError);
+            elements.audioStatus.textContent =
+              "Spotify could not start from the artwork button. Use the Spotify player below.";
+          }
         }
-
         return;
       }
 
