@@ -62,3 +62,11 @@ For the best chance of allowing the album-cover button to control Spotify, use G
 ```
 
 Google Sites still places this inside its own iframe. Some browsers may therefore block programmatic Spotify playback even after a direct click. The page now detects that case, scrolls to the official Spotify player, and asks the visitor to tap it directly.
+
+
+## Playback visual update
+
+- Particles are cleared immediately whenever Spotify or uploaded audio pauses, buffers, or ends.
+- The ring and particles visually taper during the last 3.5 seconds of a preview.
+- Uploaded/native audio also fades its actual volume during the last 3.5 seconds.
+- Spotify Embed audio cannot be volume-faded because Spotify's iframe API does not expose volume control; only its visuals can taper.
