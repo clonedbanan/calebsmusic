@@ -749,7 +749,7 @@
         <button class="button" id="uploadAudio" type="button" style="width:100%;margin-top:8px">Upload audio fallback</button>
         <input id="audioFile" type="file" accept="audio/*" hidden />
         <p class="status-line" id="previewStatus"></p>
-        <p class="admin-note">If you upload a preview, the artwork button plays that native audio with true visualization and a smooth 3.5-second fade. Spotify remains available below for full playback.</p>
+        <p class="admin-note">For dependable play and fade behavior, upload the preview in Admin. Only audio stored on this site is used for native playback; older external preview links automatically fall back to Spotify.</p>
       </div>
 
       <div class="field"><label for="appleMusicInput">Apple Music</label><input id="appleMusicInput" type="url" /></div>
@@ -903,6 +903,7 @@
     let audioContext = null;
     let analyser = null;
     let mediaSource = null;
+    let gainNode = null;
     let frequencyData = null;
     let timeData = null;
     let animationFrame = null;
@@ -911,6 +912,7 @@
     let averageBass = 0;
     let lastFrameTime = performance.now();
     let lastSourceUrl = "";
+    const NATIVE_FADE_SECONDS = 3.5;
     let spotifyIframeApi = null;
     let spotifyController = null;
     let spotifyControllerReady = false;
@@ -1185,9 +1187,78 @@
       return `${minutes}:${remainder}`;
     }
 
+    function nativePreviewUrlForSong(song) {
+      const raw = String(song?.previewUrl || "").trim();
+      if (!raw) return "";
+      if (/^(data:audio\/|blob:)/i.test(raw)) return raw;
+
+      try {
+        const url = new URL(raw, window.location.href);
+        // Only audio hosted by this exact site is dependable enough for
+        // playback, Web Audio analysis, and gain-node fading. Old external
+        // catalog preview URLs may expire or reject embedded playback.
+        if (url.origin === window.location.origin) return url.href;
+      } catch {}
+
+      return "";
+    }
+
+    function setNativeGain(value) {
+      if (!gainNode || !audioContext) return;
+      const now = audioContext.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(Math.max(0, Math.min(1, value)), now);
+    }
+
+    function scheduleNativeFade() {
+      if (!gainNode || !audioContext) return;
+      const duration = elements.audioPlayer.duration;
+      const currentTime = elements.audioPlayer.currentTime;
+      if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(currentTime)) {
+        setNativeGain(1);
+        return;
+      }
+
+      const remaining = Math.max(0, duration - currentTime);
+      const now = audioContext.currentTime;
+      const fadeDuration = Math.min(NATIVE_FADE_SECONDS, remaining);
+      const fadeStartDelay = Math.max(0, remaining - fadeDuration);
+      const startingGain = remaining < NATIVE_FADE_SECONDS
+        ? Math.max(0, remaining / NATIVE_FADE_SECONDS)
+        : 1;
+
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(startingGain, now);
+      if (fadeStartDelay > 0) {
+        gainNode.gain.setValueAtTime(1, now + fadeStartDelay);
+      }
+      gainNode.gain.linearRampToValueAtTime(0, now + remaining);
+    }
+
+    function trySpotifyPlayback(song) {
+      if (!song?.links?.spotify || !spotifyController || !spotifyControllerReady) return false;
+      try {
+        spotifyController.togglePlay();
+        return true;
+      } catch (error) {
+        console.error(error);
+        try {
+          if (!spotifyPlayback.isPaused && !spotifyPlayback.isBuffering) {
+            spotifyController.pause();
+          } else {
+            spotifyController.resume();
+          }
+          return true;
+        } catch (fallbackError) {
+          console.error(fallbackError);
+          return false;
+        }
+      }
+    }
+
     function setPlayIcons(isPlaying) {
       const song = data.songs[displayedIndex];
-      if (IS_EMBEDDED && song?.links?.spotify && !song?.previewUrl) {
+      if (IS_EMBEDDED && song?.links?.spotify && !nativePreviewUrlForSong(song)) {
         elements.coverPlayIcon.innerHTML = OPEN_ICON;
         elements.coverPlayButton.setAttribute("aria-label", "Open this song in Spotify");
         elements.coverPlayButton.setAttribute("title", "Open this song in Spotify");
@@ -1196,7 +1267,7 @@
 
       const icon = isPlaying ? PAUSE_ICON : PLAY_ICON;
       elements.coverPlayIcon.innerHTML = icon;
-      const sourceName = song?.previewUrl ? "audio preview" : "Spotify preview";
+      const sourceName = nativePreviewUrlForSong(song) ? "audio preview" : "Spotify preview";
       const label = isPlaying ? `Pause ${sourceName}` : `Play ${sourceName}`;
       elements.coverPlayButton.setAttribute("aria-label", label);
       elements.coverPlayButton.setAttribute("title", label);
@@ -1208,6 +1279,7 @@
         try { spotifyController.pause(); } catch {}
       }
       spotifyPlayback.isPaused = true;
+      setNativeGain(1);
       if (reset) {
         try { elements.audioPlayer.currentTime = 0; } catch {}
       }
@@ -1395,7 +1467,8 @@
 
     function loadPlaybackForSong(song) {
       const spotifyUrl = song.links?.spotify || "";
-      const previewUrl = song.previewUrl || "";
+      const storedPreviewUrl = song.previewUrl || "";
+      const previewUrl = nativePreviewUrlForSong(song);
       const hasSpotify = Boolean(spotifyEntityFromUrl(spotifyUrl));
 
       elements.spotifyPlayerShell.hidden = !hasSpotify;
@@ -1418,7 +1491,11 @@
       // analyzed and smoothly faded before it ends.
       if (previewUrl) {
         if (lastSourceUrl !== previewUrl) {
-          elements.audioPlayer.crossOrigin = previewUrl.startsWith("data:") || previewUrl.startsWith("blob:") ? null : "anonymous";
+            if (previewUrl.startsWith("data:") || previewUrl.startsWith("blob:")) {
+            elements.audioPlayer.removeAttribute("crossorigin");
+          } else {
+            elements.audioPlayer.crossOrigin = "anonymous";
+          }
           elements.audioPlayer.src = previewUrl;
           elements.audioPlayer.load();
           lastSourceUrl = previewUrl;
@@ -1431,38 +1508,18 @@
       elements.audioPlayer.removeAttribute("src");
       elements.audioPlayer.load();
       lastSourceUrl = "";
-      elements.audioStatus.textContent = hasSpotify
-        ? ""
-        : "No Spotify link or uploaded audio is available for this song.";
+      elements.audioStatus.textContent = storedPreviewUrl && !previewUrl && hasSpotify
+        ? "An older external preview was ignored because it may be expired or blocked. Using Spotify instead."
+        : (hasSpotify ? "" : "No Spotify link or uploaded audio is available for this song.");
     }
 
     async function togglePlayback() {
       const song = data.songs[displayedIndex];
+      const nativePreviewUrl = nativePreviewUrlForSong(song);
 
-      // Prefer native preview audio whenever one is available. This keeps the
-      // click, audio, analyzer, particles, and fade inside this exact page.
-      if (song?.previewUrl && elements.audioPlayer.src) {
-        if (elements.audioPlayer.paused) {
-          try {
-            await ensureAudioGraph();
-            elements.audioPlayer.volume = 1;
-            await elements.audioPlayer.play();
-          } catch (error) {
-            console.error(error);
-            elements.audioStatus.textContent = "The uploaded audio could not play or be analyzed.";
-          }
-        } else {
-          elements.audioPlayer.pause();
-        }
-        return;
-      }
-
-      // Google Sites places this page inside an iframe, and Spotify is then a
-      // second nested iframe. Browsers do not reliably pass the album click
-      // through both layers as a media-playback gesture. In that environment,
-      // make the button perform a dependable action instead: open the exact
-      // track in Spotify in a new tab/app.
-      if (IS_EMBEDDED && song?.links?.spotify) {
+      // Google Sites creates a nested iframe around this page. Native audio
+      // hosted by this site can still play directly; Spotify must open out.
+      if (IS_EMBEDDED && !nativePreviewUrl && song?.links?.spotify) {
         const opened = window.open(song.links.spotify, "_blank", "noopener,noreferrer");
         if (!opened) {
           elements.audioStatus.innerHTML =
@@ -1473,28 +1530,39 @@
         return;
       }
 
-      if (song?.links?.spotify && spotifyController && spotifyControllerReady) {
-        // On the standalone site this click is a direct user gesture, and
-        // Spotify's togglePlay method is the most dependable control path.
+      if (nativePreviewUrl && elements.audioPlayer.src) {
+        if (!elements.audioPlayer.paused) {
+          elements.audioPlayer.pause();
+          return;
+        }
+
         try {
-          spotifyController.togglePlay();
+          await ensureAudioGraph();
+          setNativeGain(1);
+          // Calling play directly from this click preserves the browser's
+          // user-activation permission. Await only after the promise exists.
+          const playPromise = elements.audioPlayer.play();
+          await playPromise;
+          scheduleNativeFade();
+          elements.audioStatus.textContent = song.previewSource || "Uploaded audio preview.";
+          return;
         } catch (error) {
           console.error(error);
-          try {
-            if (!spotifyPlayback.isPaused && !spotifyPlayback.isBuffering) {
-              spotifyController.pause();
-            } else {
-              spotifyController.resume();
-            }
-          } catch (fallbackError) {
-            console.error(fallbackError);
-            elements.audioStatus.textContent =
-              "Spotify could not start from the artwork button. Use the Spotify player below.";
-          }
+          elements.audioPlayer.pause();
+          setNativeGain(1);
+          stopVisualizerEffects();
+          elements.audioStatus.textContent =
+            "The uploaded preview could not play. Falling back to Spotify.";
+          if (trySpotifyPlayback(song)) return;
         }
-        return;
       }
 
+      if (trySpotifyPlayback(song)) return;
+
+      elements.audioStatus.textContent =
+        song?.links?.spotify
+          ? "Spotify is still loading. Use the Spotify player below once it appears."
+          : "No playable audio is available for this song.";
     }
 
     async function ensureAudioGraph() {
@@ -1509,8 +1577,11 @@
         frequencyData = new Uint8Array(analyser.frequencyBinCount);
         timeData = new Uint8Array(analyser.fftSize);
         mediaSource = audioContext.createMediaElementSource(elements.audioPlayer);
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = 1;
         mediaSource.connect(analyser);
-        analyser.connect(audioContext.destination);
+        analyser.connect(gainNode);
+        gainNode.connect(audioContext.destination);
       }
 
       if (audioContext.state === "suspended") await audioContext.resume();
@@ -1658,12 +1729,6 @@
       } else if (nativeNowPlaying && Number.isFinite(elements.audioPlayer.duration)) {
         const remainingSeconds = Math.max(0, elements.audioPlayer.duration - elements.audioPlayer.currentTime);
         endingFade = Math.min(1, remainingSeconds / 3.5);
-      }
-
-      if (nativeNowPlaying) {
-        // Update on every animation frame for a smooth, audible fade instead
-        // of the coarse steps produced by the timeupdate event alone.
-        elements.audioPlayer.volume = endingFade;
       }
 
       if (!nowPlaying && particles.length) stopVisualizerEffects();
@@ -2344,28 +2409,35 @@
     elements.coverPlayButton.addEventListener("click", togglePlayback);
 
     elements.audioPlayer.addEventListener("play", () => {
-      elements.audioPlayer.volume = 1;
       setPlayIcons(true);
+      scheduleNativeFade();
     });
-    elements.audioPlayer.addEventListener("timeupdate", () => {
-      if (!Number.isFinite(elements.audioPlayer.duration) || elements.audioPlayer.duration <= 0) return;
-      const remaining = elements.audioPlayer.duration - elements.audioPlayer.currentTime;
-      elements.audioPlayer.volume = remaining < 3.5
-        ? Math.max(0, Math.min(1, remaining / 3.5))
-        : 1;
-    });
+    elements.audioPlayer.addEventListener("loadedmetadata", scheduleNativeFade);
+    elements.audioPlayer.addEventListener("durationchange", scheduleNativeFade);
+    elements.audioPlayer.addEventListener("seeked", scheduleNativeFade);
     elements.audioPlayer.addEventListener("pause", () => {
+      if (!elements.audioPlayer.ended) setNativeGain(1);
       setPlayIcons(false);
       stopVisualizerEffects();
     });
     elements.audioPlayer.addEventListener("ended", () => {
-      elements.audioPlayer.volume = 1;
+      setNativeGain(1);
       setPlayIcons(false);
       stopVisualizerEffects();
     });
     elements.audioPlayer.addEventListener("error", () => {
-      elements.audioStatus.textContent = "The uploaded fallback audio could not load.";
-      if (!data.songs[displayedIndex]?.links?.spotify) elements.coverPlayButton.disabled = true;
+      setNativeGain(1);
+      stopVisualizerEffects();
+      elements.audioStatus.textContent =
+        "The uploaded preview could not load. The album button will use Spotify instead.";
+      lastSourceUrl = "";
+      elements.audioPlayer.removeAttribute("src");
+      elements.audioPlayer.load();
+      if (!data.songs[displayedIndex]?.links?.spotify) {
+        elements.coverPlayButton.disabled = true;
+      } else {
+        elements.coverPlayButton.disabled = false;
+      }
     });
 
     elements.adminButton.addEventListener("click", () => {

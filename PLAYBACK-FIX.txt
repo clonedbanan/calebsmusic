@@ -1,0 +1,7 @@
+Playback reliability update
+
+- Only same-site uploaded audio is treated as a native preview.
+- Expired or cross-origin preview links no longer hijack the album button.
+- Native previews fade through a Web Audio GainNode over the final 3.5 seconds.
+- Failed native playback falls back to Spotify on the standalone site.
+- Particles clear on pause, error, and end.
