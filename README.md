@@ -44,3 +44,21 @@ Open the local URL shown by Netlify CLI.
 - Public pages check for changes every 15 seconds.
 - New visitors load the latest published data immediately.
 - Browser local storage remains only as a migration and emergency backup.
+
+
+## Google Sites embedding
+
+For the best chance of allowing the album-cover button to control Spotify, use Google Sites' **Embed code** option rather than only pasting the URL. Replace the URL below with your production URL:
+
+```html
+<iframe
+  src="https://YOUR-SITE.netlify.app/"
+  width="100%"
+  height="1000"
+  style="border:0"
+  allow="autoplay; encrypted-media; fullscreen; clipboard-write"
+  allowfullscreen
+></iframe>
+```
+
+Google Sites still places this inside its own iframe. Some browsers may therefore block programmatic Spotify playback even after a direct click. The page now detects that case, scrolls to the official Spotify player, and asks the visitor to tap it directly.

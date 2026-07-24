@@ -913,6 +913,7 @@
     let spotifyController = null;
     let spotifyControllerReady = false;
     let spotifyLoadedUrl = "";
+    let spotifyPlayAttemptCounter = 0;
     let spotifyPlayback = {
       isPaused: true,
       isBuffering: false,
@@ -1303,6 +1304,17 @@
       controller.addListener("ready", () => {
         spotifyControllerReady = true;
         elements.coverPlayButton.disabled = false;
+
+        // Explicitly delegate media permissions to Spotify's nested iframe.
+        // This helps when the page itself is embedded by another site.
+        const spotifyFrame = elements.spotifyEmbed.querySelector("iframe");
+        if (spotifyFrame) {
+          spotifyFrame.setAttribute(
+            "allow",
+            "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          );
+          spotifyFrame.setAttribute("allowfullscreen", "");
+        }
       });
 
       controller.addListener("playback_started", event => {
@@ -1406,10 +1418,37 @@
     async function togglePlayback() {
       const song = data.songs[displayedIndex];
       if (song?.links?.spotify && spotifyController && spotifyControllerReady) {
+        const attemptId = ++spotifyPlayAttemptCounter;
+        const wasPlaying = !spotifyPlayback.isPaused && !spotifyPlayback.isBuffering;
+
         try {
-          spotifyController.togglePlay();
+          // An explicit play/resume call is more reliable than togglePlay when
+          // this page sits inside Google Sites and Spotify is a nested iframe.
+          if (wasPlaying) {
+            spotifyController.pause();
+          } else if (spotifyPlayback.position > 0) {
+            spotifyController.resume();
+          } else {
+            spotifyController.play();
+          }
         } catch (error) {
           console.error(error);
+          try { spotifyController.togglePlay(); }
+          catch (fallbackError) { console.error(fallbackError); }
+        }
+
+        if (!wasPlaying && window.self !== window.top) {
+          setTimeout(() => {
+            if (attemptId !== spotifyPlayAttemptCounter) return;
+            if (spotifyPlayback.isPaused || spotifyPlayback.isBuffering) {
+              elements.audioStatus.textContent =
+                "Google Sites blocked remote Spotify playback. Tap Play in the Spotify player below once.";
+              elements.spotifyPlayerShell.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+              });
+            }
+          }, 1100);
         }
         return;
       }

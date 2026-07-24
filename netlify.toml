@@ -10,3 +10,9 @@
   [headers.values]
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "same-origin"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Permissions-Policy = 'autoplay=(self "https://open.spotify.com"), encrypted-media=(self "https://open.spotify.com")'
+
