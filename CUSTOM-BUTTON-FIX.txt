@@ -1,0 +1,8 @@
+Custom album button fix
+
+- Restores reliable play/pause behavior for the Spotify preview.
+- When a Spotify preview has ended, the custom button now seeks to zero and
+  explicitly starts playback instead of relying on togglePlay to restart it.
+- Removes a stale-position animation check that could immediately mark a
+  restarted preview as ended.
+- Keeps the play icon reset at the true end of the preview.
