@@ -1,0 +1,7 @@
+Album play-button icon reset fix
+
+The album button now changes back to the play icon when either:
+- an uploaded native preview fires its ended event, or
+- the Spotify preview reaches the end of its reported duration.
+
+A frame-level fallback also catches cases where Spotify does not send a final paused update.

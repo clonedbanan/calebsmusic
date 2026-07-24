@@ -1386,6 +1386,16 @@
       averageBass = 0;
     }
 
+    function finishSpotifyPlayback() {
+      spotifyPlayback.isPaused = true;
+      spotifyPlayback.isBuffering = false;
+      if (spotifyPlayback.duration > 0) {
+        spotifyPlayback.position = spotifyPlayback.duration;
+      }
+      setPlayIcons(false);
+      stopVisualizerEffects();
+    }
+
     function attachSpotifyController(controller) {
       spotifyController = controller;
       spotifyControllerReady = false;
@@ -1422,9 +1432,19 @@
           duration: Number(state.duration) || 0,
           lastUpdateAt: performance.now()
         };
-        const spotifyIsPlaying = !spotifyPlayback.isPaused && !spotifyPlayback.isBuffering;
-        setPlayIcons(spotifyIsPlaying);
-        if (!spotifyIsPlaying) stopVisualizerEffects();
+
+        const reachedEnd =
+          spotifyPlayback.duration > 0 &&
+          spotifyPlayback.position >= spotifyPlayback.duration - 250;
+
+        if (reachedEnd) {
+          finishSpotifyPlayback();
+        } else {
+          const spotifyIsPlaying =
+            !spotifyPlayback.isPaused && !spotifyPlayback.isBuffering;
+          setPlayIcons(spotifyIsPlaying);
+          if (!spotifyIsPlaying) stopVisualizerEffects();
+        }
 
         const song = data.songs[displayedIndex];
         if (song && spotifyPlayback.duration > 0 && !song.durationMs) {
@@ -1719,7 +1739,21 @@
       const cornerRadius = Math.hypot(coverRect.width / 2, coverRect.height / 2);
       const ringRadius = cornerRadius + Math.max(13, width * 0.02);
       const nativeNowPlaying = !elements.audioPlayer.paused && !elements.audioPlayer.ended;
-      const spotifyNowPlaying = spotifyControllerReady && !spotifyPlayback.isPaused && !spotifyPlayback.isBuffering;
+
+      if (
+        spotifyControllerReady &&
+        !spotifyPlayback.isPaused &&
+        !spotifyPlayback.isBuffering &&
+        spotifyPlayback.duration > 0 &&
+        estimatedSpotifyPosition() >= spotifyPlayback.duration - 120
+      ) {
+        finishSpotifyPlayback();
+      }
+
+      const spotifyNowPlaying =
+        spotifyControllerReady &&
+        !spotifyPlayback.isPaused &&
+        !spotifyPlayback.isBuffering;
       const nowPlaying = nativeNowPlaying || spotifyNowPlaying;
 
       let endingFade = 1;
