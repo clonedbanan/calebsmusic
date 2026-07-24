@@ -918,12 +918,14 @@
     let spotifyControllerReady = false;
     let spotifyLoadedUrl = "";
     let spotifyPlayAttemptCounter = 0;
+    let spotifyHeartbeatTimer = null;
     let spotifyPlayback = {
       isPaused: true,
       isBuffering: false,
       position: 0,
       duration: 0,
-      lastUpdateAt: performance.now()
+      lastUpdateAt: performance.now(),
+      hasEnded: false
     };
 
     function clone(value) {
@@ -1299,6 +1301,7 @@
       if (spotifyController && spotifyControllerReady) {
         try { spotifyController.pause(); } catch {}
       }
+      clearSpotifyHeartbeat();
       spotifyPlayback.isPaused = true;
       spotifyPlayback.isBuffering = false;
       if (reset) {
@@ -1412,7 +1415,42 @@
       averageBass = 0;
     }
 
+    function clearSpotifyHeartbeat() {
+      if (spotifyHeartbeatTimer !== null) {
+        clearTimeout(spotifyHeartbeatTimer);
+        spotifyHeartbeatTimer = null;
+      }
+    }
+
+    function scheduleSpotifyHeartbeat() {
+      clearSpotifyHeartbeat();
+      if (
+        spotifyPlayback.isPaused ||
+        spotifyPlayback.isBuffering ||
+        spotifyPlayback.hasEnded
+      ) return;
+
+      const updateStamp = spotifyPlayback.lastUpdateAt;
+      spotifyHeartbeatTimer = setTimeout(() => {
+        spotifyHeartbeatTimer = null;
+
+        // Spotify normally sends playback_update events continuously while
+        // its preview is running. Some browsers do not send a final paused
+        // event when the preview ends. If updates stop while our UI still
+        // thinks Spotify is playing, treat that silence as the end state.
+        if (
+          !spotifyPlayback.isPaused &&
+          !spotifyPlayback.isBuffering &&
+          !spotifyPlayback.hasEnded &&
+          spotifyPlayback.lastUpdateAt === updateStamp
+        ) {
+          finishSpotifyPlayback();
+        }
+      }, 2400);
+    }
+
     function finishSpotifyPlayback() {
+      clearSpotifyHeartbeat();
       spotifyPlayback.isPaused = true;
       spotifyPlayback.isBuffering = false;
       spotifyPlayback.hasEnded = true;
@@ -1449,6 +1487,7 @@
         spotifyPlayback.hasEnded = false;
         spotifyPlayback.lastUpdateAt = performance.now();
         setPlayIcons(true);
+        scheduleSpotifyHeartbeat();
       });
 
       controller.addListener("playback_update", event => {
@@ -1473,7 +1512,12 @@
           const spotifyIsPlaying =
             !spotifyPlayback.isPaused && !spotifyPlayback.isBuffering;
           setPlayIcons(spotifyIsPlaying);
-          if (!spotifyIsPlaying) stopVisualizerEffects();
+          if (spotifyIsPlaying) {
+            scheduleSpotifyHeartbeat();
+          } else {
+            clearSpotifyHeartbeat();
+            stopVisualizerEffects();
+          }
         }
 
         const song = data.songs[displayedIndex];
@@ -1523,6 +1567,7 @@
 
       elements.spotifyPlayerShell.hidden = !hasSpotify;
       elements.coverPlayButton.disabled = !hasSpotify && !previewUrl;
+      clearSpotifyHeartbeat();
       spotifyPlayback.isPaused = true;
       spotifyPlayback.isBuffering = false;
       spotifyPlayback.position = 0;
