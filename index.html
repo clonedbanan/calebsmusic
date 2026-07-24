@@ -789,6 +789,8 @@
 
     const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6L19 12 8 5.2z"/></svg>';
     const PAUSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg>';
+    const OPEN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6h-2V7.4l-7.3 7.3-1.4-1.4L16.6 6H14V4zM5 5h6v2H7v10h10v-4h2v6H5V5z"/></svg>';
+    const IS_EMBEDDED = window.self !== window.top;
 
     const DEFAULT_DATA = {
       firstSwitchDate: "2026-07-26",
@@ -1184,10 +1186,19 @@
     }
 
     function setPlayIcons(isPlaying) {
+      const song = data.songs[displayedIndex];
+      if (IS_EMBEDDED && song?.links?.spotify) {
+        elements.coverPlayIcon.innerHTML = OPEN_ICON;
+        elements.coverPlayButton.setAttribute("aria-label", "Open this song in Spotify");
+        elements.coverPlayButton.setAttribute("title", "Open this song in Spotify");
+        return;
+      }
+
       const icon = isPlaying ? PAUSE_ICON : PLAY_ICON;
       elements.coverPlayIcon.innerHTML = icon;
       const label = isPlaying ? "Pause Spotify preview" : "Play Spotify preview";
       elements.coverPlayButton.setAttribute("aria-label", label);
+      elements.coverPlayButton.setAttribute("title", label);
     }
 
     function stopAudio(reset = false) {
@@ -1417,6 +1428,23 @@
 
     async function togglePlayback() {
       const song = data.songs[displayedIndex];
+
+      // Google Sites places this page inside an iframe, and Spotify is then a
+      // second nested iframe. Browsers do not reliably pass the album click
+      // through both layers as a media-playback gesture. In that environment,
+      // make the button perform a dependable action instead: open the exact
+      // track in Spotify in a new tab/app.
+      if (IS_EMBEDDED && song?.links?.spotify) {
+        const opened = window.open(song.links.spotify, "_blank", "noopener,noreferrer");
+        if (!opened) {
+          elements.audioStatus.innerHTML =
+            `Your browser blocked the new tab. <a href="${escapeHtml(song.links.spotify)}" target="_blank" rel="noopener noreferrer">Open this song in Spotify</a>.`;
+        } else {
+          elements.audioStatus.textContent = "Opened this song in Spotify.";
+        }
+        return;
+      }
+
       if (song?.links?.spotify && spotifyController && spotifyControllerReady) {
         const attemptId = ++spotifyPlayAttemptCounter;
         const wasPlaying = !spotifyPlayback.isPaused && !spotifyPlayback.isBuffering;
@@ -1437,19 +1465,6 @@
           catch (fallbackError) { console.error(fallbackError); }
         }
 
-        if (!wasPlaying && window.self !== window.top) {
-          setTimeout(() => {
-            if (attemptId !== spotifyPlayAttemptCounter) return;
-            if (spotifyPlayback.isPaused || spotifyPlayback.isBuffering) {
-              elements.audioStatus.textContent =
-                "Google Sites blocked remote Spotify playback. Tap Play in the Spotify player below once.";
-              elements.spotifyPlayerShell.scrollIntoView({
-                behavior: "smooth",
-                block: "center"
-              });
-            }
-          }, 1100);
-        }
         return;
       }
 

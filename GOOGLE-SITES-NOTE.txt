@@ -1,0 +1,8 @@
+Google Sites embeds the Netlify page in one iframe, while Spotify is embedded in a second iframe. Browsers do not reliably allow a custom button in the outer page to start media in the nested Spotify iframe.
+
+In this version:
+- On the standalone Netlify site, the album button controls the Spotify embed.
+- Inside Google Sites, the album button opens the exact Spotify song in a new tab or the Spotify app.
+- The official Spotify embed below remains playable directly inside Google Sites.
+
+This is a browser/iframe security limitation, not a Netlify deployment problem.
